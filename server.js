@@ -1,12 +1,25 @@
 // server.js
 require('dotenv').config();
 
-const express   = require('express');
-const cors      = require('cors');
-const rateLimit = require('express-rate-limit');
+const express      = require('express');
+const cors         = require('cors');
+const rateLimit    = require('express-rate-limit');
+const http         = require('http');
+const { Server }   = require('socket.io');
 const { initSchema } = require('./config/db');
+const { initSocketHandler } = require('./multiplayer/socketHandler');
 
-const app  = express();
+const app    = express();
+const server = http.createServer(app);
+const io     = new Server(server, {
+  cors: {
+    origin:  process.env.ALLOWED_ORIGIN || '*',
+    methods: ['GET', 'POST'],
+  },
+  pingTimeout:  20000,
+  pingInterval: 10000,
+});
+
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({
@@ -40,7 +53,6 @@ app.use('/api/battlepass',         require('./routes/battlepass'));
 app.use('/api/announcements',      require('./routes/announcements'));
 app.use('/api/trade-restrictions', require('./routes/traderestrictions'));
 
-// Stricter limit on marketplace writes
 app.post('/api/marketplace/buy',    writeLimiter);
 app.post('/api/marketplace/list',   writeLimiter);
 app.post('/api/marketplace/cancel', writeLimiter);
@@ -57,9 +69,11 @@ app.use((err, req, res, _next) => {
 async function boot() {
   try {
     await initSchema();
-    app.listen(PORT, () => {
+    initSocketHandler(io);
+    server.listen(PORT, () => {
       console.log(`\n🚀  topdown-backend v2 running on port ${PORT}`);
-      console.log(`    Health: http://localhost:${PORT}/health\n`);
+      console.log(`    Health:     http://localhost:${PORT}/health`);
+      console.log(`    WebSocket:  ws://localhost:${PORT}\n`);
     });
   } catch (err) {
     console.error('[Boot] Failed to start:', err.message);
