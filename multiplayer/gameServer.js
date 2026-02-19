@@ -2,13 +2,13 @@
 // Server-authoritative game logic for 2-player co-op
 // Handles rooms, enemies, wave progression, and state sync
 
-const TICK_RATE       = 20;          // 20 updates/sec to clients
+const TICK_RATE       = 30;          // 20 updates/sec to clients
 const TICK_MS         = 1000 / TICK_RATE;
 const CANVAS_W        = 900;
 const CANVAS_H        = 600;
 const PLAYER_SPEED    = 250;
 const PLAYER_MAX_HP   = 100;
-const BULLET_SPEED    = 520;
+const BULLET_SPEED    = 600;
 const BULLET_RADIUS   = 5;
 const ENEMY_RADIUS    = 18;
 const PLAYER_RADIUS   = 18;
@@ -199,7 +199,7 @@ function _spawnBullet(room, player) {
     y:  player.y,
     vx: Math.cos(player.angle) * BULLET_SPEED,
     vy: Math.sin(player.angle) * BULLET_SPEED,
-    life: 2.0, // seconds before auto-removal
+    life: 3.0, // seconds before auto-removal
   };
 }
 
