@@ -8,7 +8,7 @@ const CANVAS_W        = 900;
 const CANVAS_H        = 600;
 const PLAYER_SPEED    = 250;
 const PLAYER_MAX_HP   = 100;
-const BULLET_SPEED    = 600;
+const BULLET_SPEED    = 620;
 const BULLET_RADIUS   = 5;
 const ENEMY_RADIUS    = 18;
 const PLAYER_RADIUS   = 18;
@@ -22,6 +22,18 @@ const ENEMY_STATS = {
   tank:     { hp: 90,  speed: 55,  damage: 20, score: 25,  radius: 26, color: '#8e44ad' },
   shooter:  { hp: 35,  speed: 75,  damage: 10, score: 20,  radius: 16, color: '#2980b9' },
   miniboss: { hp: 200, speed: 60,  damage: 25, score: 75,  radius: 30, color: '#c0392b' },
+};
+
+// ─── Powerup config ───────────────────────────────────────────
+const POWERUP_TYPES = {
+  health:    { color: '#6bff7b', symbol: '+',  r: 11 },
+  rapidfire: { color: '#ffd93d', symbol: '⚡', r: 11 },
+  speed:     { color: '#9be7ff', symbol: '»',  r: 11 },
+  shield:    { color: '#b693ff', symbol: '◈',  r: 11 },
+  weapon:    { color: '#ffd700', symbol: '★',  r: 11 },
+  maxhp:     { color: '#ff69b4', symbol: '♥',  r: 11 },
+  speedup:   { color: '#00ffff', symbol: '⟫',  r: 11 },
+  nuke:      { color: '#ff6b35', symbol: '💣', r: 11 },
 };
 
 let nextId = 1;
@@ -45,6 +57,7 @@ function createRoom(hostSocket, hostUser) {
     players: {},
     enemies: {},
     bullets: {},
+    powerups: {},
     wave:         1,
     waveClearTimer: 0,
     spawnTimer:   0,
@@ -109,6 +122,11 @@ function _addPlayer(room, socket, user, isHost) {
     input:     { up: false, down: false, left: false, right: false, shooting: false, mouseX: startX, mouseY: CANVAS_H / 2 },
     shootCooldown: 0,
     reviveTimer:   0,
+    weaponLevel: 1,
+    speedLevel:  1,
+    maxHpLevel:  1,
+    rapidFire:   0,
+    shield:      false,
     score:         0,
     kills:         0,
     socket,
@@ -145,6 +163,7 @@ function _tick(room) {
   _updateBullets(room, dt);
   _updateEnemies(room, dt);
   _checkCollisions(room);
+  _updatePowerups(room, dt);
   _updateWave(room, dt);
 
   // Send state to all players every tick
@@ -172,8 +191,9 @@ function _updatePlayers(room, dt) {
 
     const len = Math.sqrt(dx * dx + dy * dy) || 1;
     if (dx !== 0 || dy !== 0) {
-      p.x += (dx / len) * PLAYER_SPEED * dt;
-      p.y += (dy / len) * PLAYER_SPEED * dt;
+      const spd = PLAYER_SPEED * (1 + (p.speedLevel - 1) * 0.15) * (p.rapidFire > 0 ? 1.15 : 1);
+      p.x += (dx / len) * spd * dt;
+      p.y += (dy / len) * spd * dt;
     }
 
     p.x = Math.max(PLAYER_RADIUS, Math.min(CANVAS_W - PLAYER_RADIUS, p.x));
@@ -184,23 +204,40 @@ function _updatePlayers(room, dt) {
     // Shooting
     p.shootCooldown = Math.max(0, p.shootCooldown - dt);
     if (p.input.shooting && p.shootCooldown <= 0) {
-      _spawnBullet(room, p);
-      p.shootCooldown = 0.15; // 150ms between shots
+      const fireRate = p.rapidFire > 0 ? 0.06 : 0.13;
+      _spawnBullets(room, p);
+      p.shootCooldown = fireRate;
     }
+    if (p.rapidFire > 0) p.rapidFire = Math.max(0, p.rapidFire - dt);
   }
 }
 
-function _spawnBullet(room, player) {
+function _spawnBullet(room, player, angleOffset = 0) {
   const id = uid();
+  const angle = player.angle + angleOffset;
   room.bullets[id] = {
     id,
     ownerId: player.socketId,
     x:  player.x,
     y:  player.y,
-    vx: Math.cos(player.angle) * BULLET_SPEED,
-    vy: Math.sin(player.angle) * BULLET_SPEED,
-    life: 3.0, // seconds before auto-removal
+    vx: Math.cos(angle) * BULLET_SPEED,
+    vy: Math.sin(angle) * BULLET_SPEED,
+    life: 2.5,
+    pierce: player.pierce || false,
   };
+}
+
+function _spawnBullets(room, player) {
+  if (player.weaponLevel === 1) {
+    _spawnBullet(room, player);
+  } else if (player.weaponLevel === 2) {
+    _spawnBullet(room, player, -0.08);
+    _spawnBullet(room, player,  0.08);
+  } else {
+    _spawnBullet(room, player, -0.14);
+    _spawnBullet(room, player,  0);
+    _spawnBullet(room, player,  0.14);
+  }
 }
 
 // ─── Bullet update ────────────────────────────────────────────
@@ -261,6 +298,9 @@ function _checkCollisions(room) {
           // Credit the shooter
           const shooter = room.players[b.ownerId];
           if (shooter) { shooter.score += e.score; shooter.kills++; }
+
+          // Chance to drop powerup
+          if (Math.random() < 0.22) _spawnPowerup(room, e.x, e.y);
         }
         break;
       }
@@ -275,6 +315,8 @@ function _checkCollisions(room) {
       const dist = Math.hypot(p.x - e.x, p.y - e.y);
       if (dist < PLAYER_RADIUS + e.radius) {
         p.hp -= e.damage * 0.016; // damage per frame equivalent
+        const dmgMult = p.shield ? 0.4 : 1;
+        p.hp -= e.damage * 0.016 * dmgMult;
         if (p.hp <= 0) _killPlayer(room, p);
       }
     }
@@ -299,6 +341,98 @@ function _revivePlayer(room, player) {
   player.hp         = PLAYER_MAX_HP * 0.5; // revive with 50% HP
   player.reviveTimer = 0;
   _broadcastToRoom(room, 'player_revived', { socketId: player.socketId });
+}
+
+// ─── Powerup system ──────────────────────────────────────────
+function _spawnPowerup(room, x, y) {
+  const playerList = Object.values(room.players);
+  const types = ['health', 'rapidfire', 'speed', 'shield'];
+
+  // Only offer upgrades if players can still level up
+  const anyWeaponBelow3 = playerList.some(p => p.weaponLevel < 3);
+  const anySpeedBelow3  = playerList.some(p => p.speedLevel  < 3);
+  const anyHpBelow3     = playerList.some(p => p.maxHpLevel  < 3);
+
+  if (Math.random() < 0.15 && anyWeaponBelow3) types.push('weapon');
+  if (Math.random() < 0.15 && anySpeedBelow3)  types.push('speedup');
+  if (Math.random() < 0.15 && anyHpBelow3)     types.push('maxhp');
+  if (Math.random() < 0.08 && room.wave >= 2)  types.push('nuke');
+
+  const type = types[Math.floor(Math.random() * types.length)];
+  const cfg  = POWERUP_TYPES[type];
+  const id   = uid();
+
+  const px = Math.max(20, Math.min(880, x));
+  const py = Math.max(20, Math.min(580, y));
+
+  room.powerups[id] = { id, type, x: px, y: py, r: cfg.r, color: cfg.color, symbol: cfg.symbol, life: 12 };
+}
+
+function _updatePowerups(room, dt) {
+  const playerList = Object.values(room.players).filter(p => p.alive);
+
+  for (const [id, pu] of Object.entries(room.powerups)) {
+    pu.life -= dt;
+    if (pu.life <= 0) { delete room.powerups[id]; continue; }
+
+    // Check player collision
+    for (const p of playerList) {
+      const dist = Math.hypot(p.x - pu.x, p.y - pu.y);
+      if (dist < PLAYER_RADIUS + pu.r) {
+        _applyPowerup(room, p, pu);
+        delete room.powerups[id];
+        break;
+      }
+    }
+  }
+}
+
+function _applyPowerup(room, player, pu) {
+  switch (pu.type) {
+    case 'health':
+      player.hp = Math.min(player.maxHp, player.hp + 30);
+      break;
+    case 'maxhp':
+      if (player.maxHpLevel < 3) {
+        player.maxHpLevel++;
+        player.maxHp = PLAYER_MAX_HP + (player.maxHpLevel - 1) * 20;
+        player.hp    = Math.min(player.hp + 20, player.maxHp);
+      }
+      break;
+    case 'rapidfire':
+      player.rapidFire = 8; // 8 seconds
+      break;
+    case 'speed':
+      player.rapidFire = Math.max(player.rapidFire, 5); // reuse as temp speed buff
+      break;
+    case 'speedup':
+      if (player.speedLevel < 3) player.speedLevel++;
+      break;
+    case 'weapon':
+      if (player.weaponLevel < 3) player.weaponLevel++;
+      break;
+    case 'shield':
+      player.shield = true;
+      setTimeout(() => { player.shield = false; }, 8000);
+      break;
+    case 'nuke':
+      // Kill all enemies in room
+      for (const e of Object.values(room.enemies)) {
+        if (e.alive) {
+          e.alive = false;
+          room.score += e.score;
+          player.score += e.score;
+          player.kills++;
+        }
+      }
+      _broadcastToRoom(room, 'nuke', { username: player.username });
+      break;
+  }
+  _broadcastToRoom(room, 'powerup_collected', {
+    socketId: player.socketId,
+    username: player.username,
+    type:     pu.type,
+  });
 }
 
 // ─── Wave management ──────────────────────────────────────────
@@ -408,7 +542,12 @@ function _broadcastState(room) {
       alive: p.alive,
       reviveTimer: p.reviveTimer,
       score: p.score,
-      kills: p.kills,
+      kills:       p.kills,
+      weaponLevel: p.weaponLevel,
+      speedLevel:  p.speedLevel,
+      maxHpLevel:  p.maxHpLevel,
+      rapidFire:   p.rapidFire,
+      shield:      p.shield,
     })),
     enemies: Object.values(room.enemies).filter(e => e.alive).map(e => ({
       id: e.id, type: e.type,
@@ -423,6 +562,7 @@ function _broadcastState(room) {
     score: room.score,
     coins: room.coins,
     waveClearTimer: room.waveClearTimer,
+    powerups: Object.values(room.powerups),
   };
 
   _broadcastToRoom(room, 'state', state);
