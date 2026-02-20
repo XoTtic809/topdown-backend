@@ -119,7 +119,7 @@ function _addPlayer(room, socket, user, isHost) {
     angle:     0,
     alive:     true,
     isHost,
-    input:     { up: false, down: false, left: false, right: false, shooting: false, mouseX: startX, mouseY: CANVAS_H / 2 },
+    input:     { up: false, down: false, left: false, right: false, shooting: false, dash: false, mouseX: startX, mouseY: CANVAS_H / 2 },
     shootCooldown: 0,
     reviveTimer:   0,
     weaponLevel: 1,
@@ -127,6 +127,10 @@ function _addPlayer(room, socket, user, isHost) {
     maxHpLevel:  1,
     rapidFire:   0,
     shield:      false,
+    dashCooldown:  0,
+    dashDuration:  0,
+    dashDir:       { x: 0, y: 0 },
+    isDashing:     false,
     score:         0,
     kills:         0,
     socket,
@@ -183,17 +187,50 @@ function _updatePlayers(room, dt) {
     }
 
     const { up, down, left, right } = p.input;
-    let dx = 0, dy = 0;
-    if (up)    dy -= 1;
-    if (down)  dy += 1;
-    if (left)  dx -= 1;
-    if (right) dx += 1;
 
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    if (dx !== 0 || dy !== 0) {
-      const spd = PLAYER_SPEED * (1 + (p.speedLevel - 1) * 0.15) * (p.rapidFire > 0 ? 1.15 : 1);
-      p.x += (dx / len) * spd * dt;
-      p.y += (dy / len) * spd * dt;
+    // ── Dash ────────────────────────────────────────────────────
+    p.dashCooldown = Math.max(0, p.dashCooldown - dt);
+
+    if (p.input.dash && p.dashCooldown <= 0 && p.dashDuration <= 0) {
+      // Determine dash direction from movement keys, fall back to mouse aim
+      let ddx = (right ? 1 : 0) - (left ? 1 : 0);
+      let ddy = (down  ? 1 : 0) - (up   ? 1 : 0);
+      if (ddx === 0 && ddy === 0) {
+        const a = Math.atan2(p.input.mouseY - p.y, p.input.mouseX - p.x);
+        ddx = Math.cos(a);
+        ddy = Math.sin(a);
+      }
+      const dlen = Math.sqrt(ddx * ddx + ddy * ddy) || 1;
+      p.dashDir     = { x: ddx / dlen, y: ddy / dlen };
+      p.dashDuration = 0.15;
+      p.dashCooldown = 3;
+    }
+    // Consume dash input each tick (one-shot edge trigger)
+    p.input.dash = false;
+
+    // ── Movement ────────────────────────────────────────────────
+    let dx = 0, dy = 0;
+
+    if (p.dashDuration > 0) {
+      // During dash: 6× speed in dash direction, invulnerable
+      p.dashDuration -= dt;
+      p.isDashing = true;
+      const dashSpd = PLAYER_SPEED * 6;
+      p.x += p.dashDir.x * dashSpd * dt;
+      p.y += p.dashDir.y * dashSpd * dt;
+    } else {
+      p.isDashing = false;
+      if (up)    dy -= 1;
+      if (down)  dy += 1;
+      if (left)  dx -= 1;
+      if (right) dx += 1;
+
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      if (dx !== 0 || dy !== 0) {
+        const spd = PLAYER_SPEED * (1 + (p.speedLevel - 1) * 0.15) * (p.rapidFire > 0 ? 1.15 : 1);
+        p.x += (dx / len) * spd * dt;
+        p.y += (dy / len) * spd * dt;
+      }
     }
 
     p.x = Math.max(PLAYER_RADIUS, Math.min(CANVAS_W - PLAYER_RADIUS, p.x));
@@ -548,6 +585,8 @@ function _broadcastState(room) {
       maxHpLevel:  p.maxHpLevel,
       rapidFire:   p.rapidFire,
       shield:      p.shield,
+      isDashing:   p.isDashing,
+      dashCooldown: p.dashCooldown,
     })),
     enemies: Object.values(room.enemies).filter(e => e.alive).map(e => ({
       id: e.id, type: e.type,
