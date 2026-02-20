@@ -89,6 +89,7 @@ function initSocketHandler(io) {
         left:     !!input.left,
         right:    !!input.right,
         shooting: !!input.shooting,
+        dash:     !!input.dash,
         mouseX:   typeof input.mouseX === 'number' ? input.mouseX : 0,
         mouseY:   typeof input.mouseY === 'number' ? input.mouseY : 0,
       });
