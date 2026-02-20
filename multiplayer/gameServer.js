@@ -4,8 +4,8 @@
 
 const TICK_RATE       = 30;          // 20 updates/sec to clients
 const TICK_MS         = 1000 / TICK_RATE;
-const CANVAS_W        = 900;
-const CANVAS_H        = 600;
+const CANVAS_W        = 1400;
+const CANVAS_H        = 800;
 const PLAYER_SPEED    = 250;
 const PLAYER_MAX_HP   = 100;
 const BULLET_SPEED    = 620;
@@ -104,7 +104,7 @@ function leaveRoom(socketId) {
 }
 
 function _addPlayer(room, socket, user, isHost) {
-  const startX = isHost ? 300 : 600;
+  const startX = isHost ? 400 : 1000;
   room.players[socket.id] = {
     socketId:  socket.id,
     uid:       user.uid,
@@ -362,8 +362,8 @@ function _spawnPowerup(room, x, y) {
   const cfg  = POWERUP_TYPES[type];
   const id   = uid();
 
-  const px = Math.max(20, Math.min(880, x));
-  const py = Math.max(20, Math.min(580, y));
+  const px = Math.max(20, Math.min(CANVAS_W - 20, x));
+  const py = Math.max(20, Math.min(CANVAS_H - 20, y));
 
   room.powerups[id] = { id, type, x: px, y: py, r: cfg.r, color: cfg.color, symbol: cfg.symbol, life: 12 };
 }
