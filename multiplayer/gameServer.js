@@ -64,6 +64,7 @@ function createRoom(hostSocket, hostUser) {
     score:        0,
     coins:        0,
     tick:         0,
+    enemiesKilledThisWave: 0,
     intervalId:   null,
     lastTick:     Date.now(),
   };
@@ -331,6 +332,7 @@ function _checkCollisions(room) {
           e.alive = false;
           room.score  += e.score;
           room.coins  += Math.floor(e.score * 0.5);
+          room.enemiesKilledThisWave++;
 
           // Credit the shooter
           const shooter = room.players[b.ownerId];
@@ -351,7 +353,6 @@ function _checkCollisions(room) {
       if (!p.alive) continue;
       const dist = Math.hypot(p.x - e.x, p.y - e.y);
       if (dist < PLAYER_RADIUS + e.radius) {
-        p.hp -= e.damage * 0.016; // damage per frame equivalent
         const dmgMult = p.shield ? 0.4 : 1;
         p.hp -= e.damage * 0.016 * dmgMult;
         if (p.hp <= 0) _killPlayer(room, p);
@@ -481,6 +482,7 @@ function _updateWave(room, dt) {
     if (room.waveClearTimer <= 0) {
       room.wave++;
       room.waveClearTimer = 0;
+      room.enemiesKilledThisWave = 0;
       _broadcastToRoom(room, 'wave_start', { wave: room.wave });
     }
     return;
@@ -593,14 +595,17 @@ function _broadcastState(room) {
       x: e.x, y: e.y,
       hp: e.hp, maxHp: e.maxHp,
       radius: e.radius, color: e.color,
+      score: e.score,
     })),
     bullets: Object.values(room.bullets).map(b => ({
-      id: b.id, x: b.x, y: b.y,
+      id: b.id, x: b.x, y: b.y, r: BULLET_RADIUS,
     })),
     wave:  room.wave,
     score: room.score,
     coins: room.coins,
-    waveClearTimer: room.waveClearTimer,
+    waveClearTimer:        room.waveClearTimer,
+    enemiesKilledThisWave: room.enemiesKilledThisWave,
+    enemiesNeeded:         8 + room.wave * 3,
     powerups: Object.values(room.powerups),
   };
 
